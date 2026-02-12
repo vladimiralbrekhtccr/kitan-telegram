@@ -10,6 +10,8 @@ Telegram bridge for Paper Parser + live tmux/Codex workflow.
 - Sends quick Telegram ack (`Got it.`).
 - Exposes local outbound reply API for this server:
   - `POST http://127.0.0.1:8788/reply`
+- Exposes local metrics endpoint:
+  - `GET http://127.0.0.1:8788/metrics`
 - Supports Paper Parser commands (`/search`, `/paper`, `/stats`), Codex commands (`/ask`, `/toai`), tmux commands, and Piper TTS.
 
 ## Docs
@@ -79,9 +81,16 @@ Notes:
 - Dedupe: same `chat_id + text` is suppressed for `TELEGRAM_LOCAL_REPLY_API_DEDUPE_SEC`.
 - IPv4 transport is enabled by default to reduce delivery lag (`TELEGRAM_FORCE_IPV4=true`).
 
+Metrics quick check:
+
+```bash
+curl -sS http://127.0.0.1:8788/metrics
+```
+
 ## Commands
 
 - `/start`, `/help`, `/id`, `/ping`
+- `/ops`
 - `/aistatus`, `/ask <text>`, `/toai <text>`
 - `/tmuxstatus`, `/totmux <text>`
 - `/search <query>`, `/paper <id>`, `/stats`

@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ START_TEXT = (
     "/toai <text>\n"
     "/totmux <text>\n"
     "/tmuxstatus\n"
+    "/ops\n"
     "/paper <id>\n"
     "/stats\n"
     "/piperlangs\n"
@@ -52,6 +54,7 @@ HELP_TEXT = (
     "/toai <text> - ask Codex\n"
     "/totmux <text> - send text to Codex tmux terminal\n"
     "/tmuxstatus - show tmux relay status\n"
+    "/ops - runtime operational metrics\n"
     "/paper <id> - show paper details\n"
     "/stats - dataset stats\n"
     "/piperlangs - list Piper TTS languages\n"
@@ -524,6 +527,14 @@ class LocalReplyAPI:
         self._send_q: queue.Queue[tuple[int, str]] = queue.Queue()
         self._dedupe_lock = threading.Lock()
         self._recent_sends: dict[tuple[int, str], float] = {}
+        self._metrics_lock = threading.Lock()
+        self._started_at = time.time()
+        self._queued_total = 0
+        self._duplicate_total = 0
+        self._sent_total = 0
+        self._failed_total = 0
+        self._latency_ms: deque[int] = deque(maxlen=200)
+        self._last_send_error = ""
 
     def _auth_ok(self, headers: dict[str, str]) -> bool:
         if not self.token:
@@ -563,6 +574,9 @@ class LocalReplyAPI:
             def do_GET(self) -> None:  # noqa: N802
                 if self.path == "/health":
                     self._json(200, {"ok": True})
+                    return
+                if self.path == "/metrics":
+                    self._json(200, outer.metrics_snapshot())
                     return
                 if self.path == "/last_chat":
                     chat_id, updated_at = outer.state.snapshot()
@@ -632,10 +646,12 @@ class LocalReplyAPI:
 
                 if outer._is_duplicate(chat_id, text):
                     LOG.info("reply-api duplicate suppressed chat_id=%s chars=%s", chat_id, len(text))
+                    outer._mark_duplicate()
                     self._json(200, {"ok": True, "chat_id": int(chat_id), "chars": len(text), "duplicate": True})
                     return
 
                 outer._send_q.put((int(chat_id), text))
+                outer._mark_queued()
                 self._json(200, {"ok": True, "chat_id": int(chat_id), "chars": len(text), "queued": True})
 
         self.server = ThreadingHTTPServer((self.host, self.port), Handler)
@@ -677,6 +693,48 @@ class LocalReplyAPI:
             self._recent_sends[key] = now
             return False
 
+    def _mark_queued(self) -> None:
+        with self._metrics_lock:
+            self._queued_total += 1
+
+    def _mark_duplicate(self) -> None:
+        with self._metrics_lock:
+            self._duplicate_total += 1
+
+    def _mark_sent(self, latency_ms: int) -> None:
+        with self._metrics_lock:
+            self._sent_total += 1
+            self._latency_ms.append(max(0, int(latency_ms)))
+
+    def _mark_failed(self, error: str) -> None:
+        with self._metrics_lock:
+            self._failed_total += 1
+            self._last_send_error = (error or "").strip()[:300]
+
+    def metrics_snapshot(self) -> dict:
+        with self._metrics_lock:
+            latencies = sorted(self._latency_ms)
+            avg_ms = int(sum(latencies) / len(latencies)) if latencies else None
+            p95_ms = None
+            if latencies:
+                idx = int(round(0.95 * (len(latencies) - 1)))
+                p95_ms = int(latencies[idx])
+            return {
+                "ok": True,
+                "enabled": bool(self.enabled),
+                "started_at": datetime.fromtimestamp(self._started_at, tz=timezone.utc).isoformat(),
+                "uptime_sec": int(max(0, time.time() - self._started_at)),
+                "queue_depth": int(self._send_q.qsize()),
+                "queued_total": int(self._queued_total),
+                "sent_total": int(self._sent_total),
+                "failed_total": int(self._failed_total),
+                "duplicate_total": int(self._duplicate_total),
+                "latency_samples": int(len(latencies)),
+                "latency_avg_ms": avg_ms,
+                "latency_p95_ms": p95_ms,
+                "last_send_error": self._last_send_error or None,
+            }
+
     def _send_worker(self) -> None:
         while True:
             chat_id, text = self._send_q.get()
@@ -684,8 +742,11 @@ class LocalReplyAPI:
                 t0 = time.time()
                 LOG.info("reply-api send chat_id=%s chars=%s", chat_id, len(text))
                 self.tg.send(int(chat_id), text)
-                LOG.info("reply-api sent chat_id=%s chars=%s latency_ms=%s", chat_id, len(text), int((time.time() - t0) * 1000))
+                elapsed_ms = int((time.time() - t0) * 1000)
+                self._mark_sent(elapsed_ms)
+                LOG.info("reply-api sent chat_id=%s chars=%s latency_ms=%s", chat_id, len(text), elapsed_ms)
             except Exception as exc:
+                self._mark_failed(str(exc))
                 LOG.exception("reply-api send failed chat_id=%s: %s", chat_id, exc)
             finally:
                 self._send_q.task_done()
@@ -1283,6 +1344,26 @@ def _render_codex_status(codex_ai: CodexAssistant) -> str:
     )
 
 
+def _render_ops_status(cfg: Config, reply_api: LocalReplyAPI) -> str:
+    metrics = reply_api.metrics_snapshot()
+    lines = [
+        "ops:",
+        f"- force_ipv4: {'yes' if cfg.telegram_force_ipv4 else 'no'}",
+        f"- reply_api: {'enabled' if reply_api.enabled else 'disabled'}",
+        f"- uptime_sec: {metrics.get('uptime_sec')}",
+        f"- queue_depth: {metrics.get('queue_depth')}",
+        f"- queued_total: {metrics.get('queued_total')}",
+        f"- sent_total: {metrics.get('sent_total')}",
+        f"- failed_total: {metrics.get('failed_total')}",
+        f"- duplicate_total: {metrics.get('duplicate_total')}",
+        f"- latency_avg_ms: {metrics.get('latency_avg_ms')}",
+        f"- latency_p95_ms: {metrics.get('latency_p95_ms')}",
+    ]
+    if metrics.get("last_send_error"):
+        lines.append(f"- last_send_error: {metrics.get('last_send_error')}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("TELEGRAM_LOG_LEVEL", "INFO"),
@@ -1415,6 +1496,8 @@ def main() -> int:
                     tg.send(int(chat_id), HELP_TEXT)
                 elif cmd == "/aistatus":
                     tg.send(int(chat_id), _render_codex_status(codex_ai))
+                elif cmd == "/ops":
+                    tg.send(int(chat_id), _render_ops_status(cfg, reply_api))
                 elif cmd == "/ping":
                     tg.send(int(chat_id), f"pong {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
                 elif cmd == "/ask" or cmd == "/toai":
