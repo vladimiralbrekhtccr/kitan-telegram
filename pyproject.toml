@@ -1,0 +1,8 @@
+[project]
+name = "kitan-telegram"
+version = "0.1.0"
+description = "Telegram bot bridge for Paper Parser"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28.1",
+]

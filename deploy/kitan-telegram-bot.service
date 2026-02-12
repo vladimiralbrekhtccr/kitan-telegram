@@ -1,0 +1,17 @@
+[Unit]
+Description=Kitan Telegram Bot (Paper Parser bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=foggen
+WorkingDirectory=/home/foggen/kitan-telegram
+EnvironmentFile=-/home/foggen/kitan-telegram/.env
+Environment=PATH=/home/foggen/.nvm/versions/node/v20.20.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/foggen/.local/bin/uv run python bot.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

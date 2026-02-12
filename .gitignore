@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.env
+
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+
+# Runtime assets; keep local, do not commit
+models/
+vendor/
