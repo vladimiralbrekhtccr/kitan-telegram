@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -105,6 +106,7 @@ class Config:
     plain_text_reply_mode: str
     plain_text_quick_reply: str
     codex_session_reply_timeout_sec: int
+    codex_session_reply_workers: int
     skip_backlog_on_start: bool
     reply_api_enabled: bool
     reply_api_host: str
@@ -233,6 +235,7 @@ def load_config() -> Config:
         plain_text_reply_mode=plain_text_reply_mode,
         plain_text_quick_reply=plain_text_quick_reply,
         codex_session_reply_timeout_sec=max(15, _int_env("TELEGRAM_CODEX_SESSION_REPLY_TIMEOUT_SEC", 180)),
+        codex_session_reply_workers=max(1, _int_env("TELEGRAM_CODEX_SESSION_REPLY_WORKERS", 4)),
         skip_backlog_on_start=_bool_env("TELEGRAM_SKIP_BACKLOG_ON_START", False),
         reply_api_enabled=_bool_env("TELEGRAM_LOCAL_REPLY_API_ENABLED", True),
         reply_api_host=(os.environ.get("TELEGRAM_LOCAL_REPLY_API_HOST") or "127.0.0.1").strip(),
@@ -960,14 +963,15 @@ class AsyncCodexSessionReplier:
     def __init__(self, cfg: Config):
         self.thread_id = (cfg.codex_thread_id or "").strip()
         self.timeout_sec = cfg.codex_session_reply_timeout_sec
+        self.workers = max(1, int(cfg.codex_session_reply_workers))
         self.sessions_root = Path(
             (os.environ.get("TELEGRAM_CODEX_SESSIONS_ROOT") or str(Path.home() / ".codex/sessions")).strip()
         )
         # Dedicated Telegram client in this worker thread.
         self.tg = TelegramClient(cfg.telegram_token, timeout_sec=35.0, force_ipv4=cfg.telegram_force_ipv4)
-        self.q: queue.Queue[tuple[int, float, Path, int]] = queue.Queue()
-        self.thread = threading.Thread(target=self._run, daemon=True, name="codex-session-reply-worker")
-        self.thread.start()
+        self.pool = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="codex-session-reply")
+        self._latest_lock = threading.Lock()
+        self._latest_request: dict[int, float] = {}
 
     def _resolve_session_file(self) -> Path | None:
         if not self.thread_id:
@@ -985,13 +989,20 @@ class AsyncCodexSessionReplier:
             raise RuntimeError("Codex session file not found for TELEGRAM_CODEX_THREAD_ID")
         start_offset = session_file.stat().st_size
         enqueued_at = time.time()
+        with self._latest_lock:
+            self._latest_request[int(chat_id)] = enqueued_at
         LOG.info(
             "session-reply enqueue chat_id=%s file=%s start_offset=%s",
             chat_id,
             session_file,
             start_offset,
         )
-        self.q.put((chat_id, enqueued_at, session_file, start_offset))
+        self.pool.submit(self._handle, int(chat_id), enqueued_at, session_file, start_offset)
+
+    def _is_latest(self, chat_id: int, enqueued_at: float) -> bool:
+        with self._latest_lock:
+            latest = self._latest_request.get(int(chat_id), 0.0)
+        return latest <= enqueued_at + 1e-6
 
     @staticmethod
     def _extract_assistant_text(line: str, min_epoch: float) -> str:
@@ -1061,33 +1072,32 @@ class AsyncCodexSessionReplier:
                     text = self._extract_assistant_text(line, enqueued_at)
                     if text:
                         return text
-            time.sleep(1.0)
+            time.sleep(0.35)
         if carry:
             text = self._extract_assistant_text(carry, enqueued_at)
             if text:
                 return text
         return ""
 
-    def _run(self) -> None:
-        while True:
-            chat_id, enqueued_at, session_file, start_offset = self.q.get()
+    def _handle(self, chat_id: int, enqueued_at: float, session_file: Path, start_offset: int) -> None:
+        try:
+            LOG.info("session-reply wait start chat_id=%s", chat_id)
+            reply = self._wait_for_reply(enqueued_at, session_file, start_offset)
+            if not self._is_latest(chat_id, enqueued_at):
+                LOG.info("session-reply stale skipped chat_id=%s", chat_id)
+                return
+            if reply:
+                LOG.info("session-reply found chat_id=%s chars=%s", chat_id, len(reply))
+                self.tg.send(chat_id, reply)
+            else:
+                LOG.warning("session-reply timeout chat_id=%s", chat_id)
+                self.tg.send(chat_id, "No assistant reply from this Codex chat yet.")
+        except Exception as exc:
+            LOG.exception("session-reply error chat_id=%s: %s", chat_id, exc)
             try:
-                LOG.info("session-reply wait start chat_id=%s", chat_id)
-                reply = self._wait_for_reply(enqueued_at, session_file, start_offset)
-                if reply:
-                    LOG.info("session-reply found chat_id=%s chars=%s", chat_id, len(reply))
-                    self.tg.send(chat_id, reply)
-                else:
-                    LOG.warning("session-reply timeout chat_id=%s", chat_id)
-                    self.tg.send(chat_id, "No assistant reply from this Codex chat yet.")
-            except Exception as exc:
-                LOG.exception("session-reply error chat_id=%s: %s", chat_id, exc)
-                try:
-                    self.tg.send(chat_id, f"session reply error: {exc}")
-                except Exception:
-                    LOG.exception("Failed to send session reply error to chat_id=%s", chat_id)
-            finally:
-                self.q.task_done()
+                self.tg.send(chat_id, f"session reply error: {exc}")
+            except Exception:
+                LOG.exception("Failed to send session reply error to chat_id=%s", chat_id)
 
 
 class TmuxRelay:

@@ -80,6 +80,7 @@ Notes:
 - Async queue: API returns quickly (`queued: true`).
 - Dedupe: same `chat_id + text` is suppressed for `TELEGRAM_LOCAL_REPLY_API_DEDUPE_SEC`.
 - IPv4 transport is enabled by default to reduce delivery lag (`TELEGRAM_FORCE_IPV4=true`).
+- Session reply watcher supports parallel workers to reduce reply lag under burst traffic (`TELEGRAM_CODEX_SESSION_REPLY_WORKERS`).
 
 Metrics quick check:
 
