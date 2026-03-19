@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Kitan Telegram quick transport self-test periodically
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=kitan-telegram-self-test-quick.service
+
+[Install]
+WantedBy=timers.target

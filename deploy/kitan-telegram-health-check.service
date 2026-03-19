@@ -1,0 +1,11 @@
+[Unit]
+Description=Kitan Telegram Bot Health Check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=foggen
+WorkingDirectory=/home/foggen/kitan-telegram
+EnvironmentFile=-/home/foggen/kitan-telegram/.env
+ExecStart=/home/foggen/kitan-telegram/scripts/health_check.sh

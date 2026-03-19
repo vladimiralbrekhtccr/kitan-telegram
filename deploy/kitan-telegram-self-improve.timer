@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Kitan Telegram self-improve nudge every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=kitan-telegram-self-improve.service
+
+[Install]
+WantedBy=timers.target
+

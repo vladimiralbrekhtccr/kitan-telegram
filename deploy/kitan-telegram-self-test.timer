@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Kitan Telegram reliability self-test periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=kitan-telegram-self-test.service
+
+[Install]
+WantedBy=timers.target
+

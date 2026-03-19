@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Kitan Telegram Yuuki Watcher periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
+Unit=kitan-telegram-watcher.service
+
+[Install]
+WantedBy=timers.target
+

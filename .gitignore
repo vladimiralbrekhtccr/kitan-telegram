@@ -12,3 +12,5 @@ __pycache__/
 # Runtime assets; keep local, do not commit
 models/
 vendor/
+logs/
+runtime/

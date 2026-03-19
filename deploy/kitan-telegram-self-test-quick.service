@@ -1,0 +1,14 @@
+[Unit]
+Description=Kitan Telegram Reliability Self-Test (Quick Transport Profile)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=foggen
+WorkingDirectory=/home/foggen/kitan-telegram
+Environment=YUUKI_SELF_TEST_PROFILE=quick
+Environment=YUUKI_SELF_TEST_STATUS_PATH=/home/foggen/kitan-telegram/runtime/self_test_quick_latest.json
+Environment=YUUKI_SELF_TEST_ONLY=
+Environment=PATH=/home/foggen/.nvm/versions/node/v20.20.0/bin:/home/foggen/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/foggen/kitan-telegram/scripts/self_test_transport_quick.sh

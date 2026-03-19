@@ -1,0 +1,99 @@
+groups:
+  - name: kitan_telegram_core
+    interval: 30s
+    rules:
+      - record: yuuki:reply_failure_ratio_10m
+        expr: |
+          increase(yuuki_reply_failed_total[10m])
+          /
+          clamp_min(increase(yuuki_reply_sent_total[10m]) + increase(yuuki_reply_failed_total[10m]), 1)
+
+      - alert: YuukiHealthCritical
+        expr: yuuki_alert_should_page == 1
+        for: 2m
+        labels:
+          severity: critical
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki health is critical"
+          description: "statuscode indicates critical+page condition for at least 2 minutes."
+
+      - alert: YuukiHealthStale
+        expr: yuuki_health_stale == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki health snapshot is stale"
+          description: "health snapshot stayed stale for 10 minutes; check health-check timer/service."
+
+      - alert: YuukiQuickLaneStale
+        expr: yuuki_health_quick_lane_state == 2
+        for: 10m
+        labels:
+          severity: warning
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki quick lane is stale"
+          description: "quick self-test lane is stale; check quick self-test timer cadence."
+
+      - alert: YuukiQuickLaneMissingOrFailed
+        expr: yuuki_health_quick_lane_state >= 3
+        for: 3m
+        labels:
+          severity: critical
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki quick lane missing or failed"
+          description: "quick self-test lane is missing or failed; check quick service, timer, and runtime path."
+
+      - alert: YuukiReplyAuthProbeFail
+        expr: yuuki_reply_auth_probe_state == 2
+        for: 3m
+        labels:
+          severity: critical
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki /reply auth probe failing"
+          description: "live /reply auth probe is failing; check token wiring and local reply API service."
+
+      - alert: YuukiReplyQueueDropOldest
+        expr: increase(yuuki_reply_queue_dropped_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki reply queue is dropping oldest messages"
+          description: "reply queue drop-oldest events detected in last 10 minutes."
+
+      - alert: YuukiReplyQueueReject
+        expr: increase(yuuki_reply_queue_full_rejected_total[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki reply queue rejected messages"
+          description: "reply queue full rejections detected; user-visible responses may be lost."
+
+      - alert: YuukiReplyFailuresBurst
+        expr: increase(yuuki_reply_failed_total[10m]) >= 3
+        for: 2m
+        labels:
+          severity: warning
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki reply send failures burst"
+          description: "3 or more reply send failures in 10 minutes."
+
+      - alert: YuukiReplyFailureRatioHigh
+        expr: yuuki:reply_failure_ratio_10m > 0.15
+        for: 5m
+        labels:
+          severity: warning
+          service: kitan-telegram
+        annotations:
+          summary: "Yuuki reply failure ratio is high"
+          description: "reply failure ratio over 15% for 5 minutes."

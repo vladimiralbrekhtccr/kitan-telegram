@@ -1,0 +1,22 @@
+[Unit]
+Description=Keep Codex alive in tmux relay pane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=foggen
+WorkingDirectory=/home/foggen
+Environment=CODEX_TMUX_SESSION_NAME=relay
+Environment=CODEX_TMUX_TARGET_PANE=relay:relay.0
+Environment=CODEX_WORKDIR=/home/foggen
+Environment=CODEX_BIN=/home/foggen/.nvm/versions/node/v20.20.0/bin/codex
+Environment=CODEX_GUARD_CHECK_SEC=3
+Environment=CODEX_RESUME_SESSION_ID=
+Environment=PATH=/home/foggen/.nvm/versions/node/v20.20.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/foggen/kitan-telegram/scripts/codex_tmux_guard.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

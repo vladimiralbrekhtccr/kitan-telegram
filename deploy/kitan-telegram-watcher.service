@@ -1,0 +1,12 @@
+[Unit]
+Description=Kitan Telegram Yuuki Watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=foggen
+WorkingDirectory=/home/foggen/kitan-telegram
+EnvironmentFile=-/home/foggen/kitan-telegram/.env
+ExecStart=/home/foggen/kitan-telegram/scripts/yuuki_watcher.sh
+

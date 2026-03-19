@@ -1,0 +1,12 @@
+[Unit]
+Description=Kitan Telegram Reliability Self-Test
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=foggen
+WorkingDirectory=/home/foggen/kitan-telegram
+EnvironmentFile=-/home/foggen/kitan-telegram/.env
+Environment=PATH=/home/foggen/.nvm/versions/node/v20.20.0/bin:/home/foggen/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/foggen/kitan-telegram/scripts/self_test_reliability.sh
